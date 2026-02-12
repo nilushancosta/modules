@@ -1,6 +1,5 @@
 fluent-bit:
   enabled: true
-
   config:
     customParsers: |
       [PARSER]
@@ -9,7 +8,6 @@ fluent-bit:
           Time_Keep Off
           Time_Key time
           Time_Format %Y-%m-%dT%H:%M:%S.%L
-
     inputs: |
       [INPUT]
           Name tail
@@ -25,7 +23,6 @@ fluent-bit:
           Refresh_Interval 5
           Skip_Long_Lines On
           Tag kube.*
-
     filters: |
       [FILTER]
           Name kubernetes
@@ -37,7 +34,6 @@ fluent-bit:
           Merge_Log Off
           tls.verify Off
           Use_Kubelet true
-
     outputs: |
       [OUTPUT]
           Name opensearch
@@ -53,25 +49,20 @@ fluent-bit:
           Suppress_Type_Name On
           tls On
           tls.verify Off
-
   dnsPolicy: ClusterFirstWithHostNet
   fullnameOverride: "fluent-bit"
   hostNetwork: true
-
   extraVolumeMounts:
-  - name: db
-    mountPath: "/var/lib/fluent-bit/db"
-    readOnly: false
-
+    - name: db
+      mountPath: "/var/lib/fluent-bit/db"
+      readOnly: false
   extraVolumes:
     - name: db
       hostPath:
         path: /var/lib/fluent-bit/db
         type: DirectoryOrCreate
-
   rbac:
     nodeAccess: true
-
   resources:
     limits:
       cpu: 200m
@@ -79,73 +70,57 @@ fluent-bit:
     requests:
       cpu: 100m
       memory: 128Mi
-
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:
       drop:
-      - ALL
+        - ALL
     readOnlyRootFilesystem: true
     runAsNonRoot: true
     runAsUser: 10000
-
   testFramework:
     enabled: false
-
   initContainers:
-  - name: set-volume-ownership
-    image: busybox
-    command: ["sh", "-c", "chown -R 10000:10000 /var/lib/fluent-bit/db"]
-    resources:
-      limits:
-        cpu: 15m
-        memory: "32Mi"
-      requests:
-        cpu: 10m
-        memory: "24Mi"
-    securityContext:
-      capabilities:
-        drop:
-        - ALL
-      privileged: true
-      readOnlyRootFilesystem: true
-      runAsUser: 0
-    volumeMounts:
-    - name: db
-      mountPath: /var/lib/fluent-bit/db
-
-
+    - name: set-volume-ownership
+      image: busybox
+      command: ["sh", "-c", "chown -R 10000:10000 /var/lib/fluent-bit/db"]
+      resources:
+        limits:
+          cpu: 15m
+          memory: "32Mi"
+        requests:
+          cpu: 10m
+          memory: "24Mi"
+      securityContext:
+        capabilities:
+          drop:
+            - ALL
+        privileged: true
+        readOnlyRootFilesystem: true
+        runAsUser: 0
+      volumeMounts:
+        - name: db
+          mountPath: /var/lib/fluent-bit/db
 openSearch:
   enabled: true
-
   extraEnvs:
     - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
       value: ThisIsTheOpenSearchPassword1
-
   nameOverride: "opensearch"
-
   image:
     tag: "3.3.0"
-
   masterService: opensearch
-
   rbac:
     create: true
     serviceAccountName: "opensearch"
-
   singleNode: true
-
-
 openSearchSetup:
   image:
-    repository: "oc-module-opensearch-init"
-    tag: "latest"
-
+    repository: "ghcr.io/nilushancosta/observability-logs-opensearch-setup"
+    tag: "84240c4"
   openSearchUsername: "admin"
   openSearchPassword: "ThisIsTheOpenSearchPassword1"
-
   alertingWebhookUrl: "http://observer.openchoreo-observability-plane:8080/api/alerting/webhook/opensearch"
-
   dataRetentionTime:
     containerLogs: "30d"
     traces: "30d"
