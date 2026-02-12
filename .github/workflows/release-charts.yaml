@@ -85,12 +85,12 @@ jobs:
           # Upload and update index if there are new packages
           if ls .cr-release-packages/*.tgz 1>/dev/null 2>&1; then
             echo "Uploading chart packages..."
-            cr upload --owner "$owner" --repo "$repo" \
+            cr upload --owner "$owner" --git-repo "$repo" \
               --package-path .cr-release-packages \
               --skip-existing
 
             echo "Updating chart repo index..."
-            cr index --owner "$owner" --repo "$repo" \
+            cr index --owner "$owner" --git-repo "$repo" \
               --package-path .cr-release-packages \
               --index-path .cr-index/index.yaml \
               --push
