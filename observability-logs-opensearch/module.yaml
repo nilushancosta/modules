@@ -9,4 +9,3 @@ images:
     dockerfile: init/Dockerfile
     valuesYaml:
       repositoryPath: ".openSearchSetup.image.repository"
-      tagPath: ".openSearchSetup.image.tag"

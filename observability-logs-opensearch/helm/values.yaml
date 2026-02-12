@@ -117,7 +117,6 @@ openSearch:
 openSearchSetup:
   image:
     repository: "ghcr.io/nilushancosta/observability-logs-opensearch-setup"
-    tag: "84240c4"
   openSearchUsername: "admin"
   openSearchPassword: "ThisIsTheOpenSearchPassword1"
   alertingWebhookUrl: "http://observer.openchoreo-observability-plane:8080/api/alerting/webhook/opensearch"
