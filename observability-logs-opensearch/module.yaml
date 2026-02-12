@@ -4,7 +4,7 @@
 # to update the resulting tag in helm/values.yaml.
 
 images:
-  - name: oc-module-opensearch-init
+  - name: observability-logs-opensearch-setup
     context: init
     dockerfile: init/Dockerfile
     valuesYaml:
