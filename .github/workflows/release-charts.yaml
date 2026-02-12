@@ -8,7 +8,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  packages: write
 
 jobs:
   release:
@@ -16,13 +17,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Configure Git
-        run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -30,21 +24,12 @@ jobs:
       - name: Install yq
         uses: mikefarah/yq@v4
 
-      - name: Install chart-releaser
-        uses: helm/chart-releaser-action@v1.7.0
-        with:
-          install_only: true
-        env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
 
-      - name: Package and release charts
-        env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      - name: Package and push charts
         run: |
-          owner=$(echo "$GITHUB_REPOSITORY" | cut -d/ -f1)
-          repo=$(echo "$GITHUB_REPOSITORY" | cut -d/ -f2)
-
-          mkdir -p .cr-release-packages .cr-index
+          REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
 
           for module_dir in */; do
             module="${module_dir%/}"
@@ -56,15 +41,8 @@ jobs:
 
             chart_name=$(yq '.name' "${chart_dir}/Chart.yaml")
             chart_version=$(yq '.version' "${chart_dir}/Chart.yaml")
-            release_tag="${chart_name}-${chart_version}"
 
-            # Skip if this version was already released
-            if git tag -l "$release_tag" | grep -q "$release_tag"; then
-              echo "Release ${release_tag} already exists, skipping"
-              continue
-            fi
-
-            echo "Packaging ${chart_name} v${chart_version}..."
+            echo "::group::${chart_name} v${chart_version}"
 
             # Add dependency repos and build
             dep_count=$(yq '.dependencies | length' "${chart_dir}/Chart.yaml")
@@ -79,21 +57,10 @@ jobs:
               helm dependency build "${chart_dir}"
             fi
 
-            helm package "${chart_dir}" -d .cr-release-packages
+            helm package "${chart_dir}" -d .packages
+
+            echo "Pushing ${chart_name}:${chart_version} to ghcr.io/${REPO_OWNER}/charts..."
+            helm push ".packages/${chart_name}-${chart_version}.tgz" "oci://ghcr.io/${REPO_OWNER}/charts"
+
+            echo "::endgroup::"
           done
-
-          # Upload and update index if there are new packages
-          if ls .cr-release-packages/*.tgz 1>/dev/null 2>&1; then
-            echo "Uploading chart packages..."
-            cr upload --owner "$owner" --git-repo "$repo" \
-              --package-path .cr-release-packages \
-              --skip-existing
-
-            echo "Updating chart repo index..."
-            cr index --owner "$owner" --git-repo "$repo" \
-              --package-path .cr-release-packages \
-              --index-path .cr-index/index.yaml \
-              --push
-          else
-            echo "No new chart versions to release"
-          fi
