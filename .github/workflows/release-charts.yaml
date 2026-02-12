@@ -30,33 +30,70 @@ jobs:
       - name: Install yq
         uses: mikefarah/yq@v4
 
-      - name: Add dependency chart repos
-        run: |
-          for chart_yaml in */helm/Chart.yaml; do
-            chart_dir=$(dirname "$chart_yaml")
-            dep_count=$(yq '.dependencies | length' "$chart_yaml")
+      - name: Install chart-releaser
+        uses: helm/chart-releaser-action@v1.7.0
+        with:
+          install_only: true
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
-            if [ "$dep_count" = "null" ] || [ "$dep_count" = "0" ]; then
+      - name: Package and release charts
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        run: |
+          owner=$(echo "$GITHUB_REPOSITORY" | cut -d/ -f1)
+          repo=$(echo "$GITHUB_REPOSITORY" | cut -d/ -f2)
+
+          mkdir -p .cr-release-packages .cr-index
+
+          for module_dir in */; do
+            module="${module_dir%/}"
+            chart_dir="${module}/helm"
+
+            if [ ! -f "${chart_dir}/Chart.yaml" ]; then
               continue
             fi
 
-            for i in $(seq 0 $((dep_count - 1))); do
-              repo=$(yq ".dependencies[${i}].repository" "$chart_yaml")
-              if [ -n "$repo" ] && [ "$repo" != "null" ]; then
-                repo_name="dep-$(echo "$repo" | md5sum | cut -d' ' -f1)"
-                helm repo add "$repo_name" "$repo" 2>/dev/null || true
-              fi
-            done
+            chart_name=$(yq '.name' "${chart_dir}/Chart.yaml")
+            chart_version=$(yq '.version' "${chart_dir}/Chart.yaml")
+            release_tag="${chart_name}-${chart_version}"
 
-            echo "Building dependencies for ${chart_dir}"
-            helm dependency build "$chart_dir"
+            # Skip if this version was already released
+            if git tag -l "$release_tag" | grep -q "$release_tag"; then
+              echo "Release ${release_tag} already exists, skipping"
+              continue
+            fi
+
+            echo "Packaging ${chart_name} v${chart_version}..."
+
+            # Add dependency repos and build
+            dep_count=$(yq '.dependencies | length' "${chart_dir}/Chart.yaml")
+            if [ "$dep_count" != "null" ] && [ "$dep_count" != "0" ]; then
+              for i in $(seq 0 $((dep_count - 1))); do
+                dep_repo=$(yq ".dependencies[${i}].repository" "${chart_dir}/Chart.yaml")
+                if [ -n "$dep_repo" ] && [ "$dep_repo" != "null" ]; then
+                  dep_name="dep-$(echo "$dep_repo" | md5sum | cut -d' ' -f1)"
+                  helm repo add "$dep_name" "$dep_repo" 2>/dev/null || true
+                fi
+              done
+              helm dependency build "${chart_dir}"
+            fi
+
+            helm package "${chart_dir}" -d .cr-release-packages
           done
 
-      - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.7.0
-        with:
-          charts_dir: .
-          skip_existing: true
-          mark_as_latest: false
-        env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          # Upload and update index if there are new packages
+          if ls .cr-release-packages/*.tgz 1>/dev/null 2>&1; then
+            echo "Uploading chart packages..."
+            cr upload --owner "$owner" --repo "$repo" \
+              --package-path .cr-release-packages \
+              --skip-existing
+
+            echo "Updating chart repo index..."
+            cr index --owner "$owner" --repo "$repo" \
+              --package-path .cr-release-packages \
+              --index-path .cr-index/index.yaml \
+              --push
+          else
+            echo "No new chart versions to release"
+          fi
