@@ -9,4 +9,5 @@ USER opensearch
 
 COPY --chown=opensearch --chmod=0540 setup-opensearch.sh setup-opensearch.sh
 
+
 CMD ["bash", "setup-opensearch.sh"] 
