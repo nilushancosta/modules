@@ -1,0 +1,5 @@
+# Downloaded Helm chart dependencies
+**/helm/charts/*.tgz
+
+# Helm packaging artifacts
+*.tgz

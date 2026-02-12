@@ -1,0 +1,12 @@
+# Module: observability-logs-opensearch
+# This file declares the container images that belong to this module.
+# The build-images workflow reads this to know what to build and where
+# to update the resulting tag in helm/values.yaml.
+
+images:
+  - name: oc-module-opensearch-init
+    context: init
+    dockerfile: init/Dockerfile
+    valuesYaml:
+      repositoryPath: ".openSearchSetup.image.repository"
+      tagPath: ".openSearchSetup.image.tag"

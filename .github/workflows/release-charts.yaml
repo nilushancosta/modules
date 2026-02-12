@@ -1,0 +1,62 @@
+name: Release Charts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/helm/Chart.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install yq
+        uses: mikefarah/yq@v4
+
+      - name: Add dependency chart repos
+        run: |
+          for chart_yaml in */helm/Chart.yaml; do
+            chart_dir=$(dirname "$chart_yaml")
+            dep_count=$(yq '.dependencies | length' "$chart_yaml")
+
+            if [ "$dep_count" = "null" ] || [ "$dep_count" = "0" ]; then
+              continue
+            fi
+
+            for i in $(seq 0 $((dep_count - 1))); do
+              repo=$(yq ".dependencies[${i}].repository" "$chart_yaml")
+              if [ -n "$repo" ] && [ "$repo" != "null" ]; then
+                repo_name="dep-$(echo "$repo" | md5sum | cut -d' ' -f1)"
+                helm repo add "$repo_name" "$repo" 2>/dev/null || true
+              fi
+            done
+
+            echo "Building dependencies for ${chart_dir}"
+            helm dependency build "$chart_dir"
+          done
+
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.7.0
+        with:
+          charts_dir: .
+          skip_existing: true
+          mark_as_latest: false
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"

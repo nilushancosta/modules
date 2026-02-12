@@ -1,0 +1,102 @@
+name: Build and Push Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/init/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Install yq
+        uses: mikefarah/yq@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Detect changes, build and push images
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          UPDATED=false
+
+          # Determine changed files
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+          else
+            CHANGED_FILES=$(git ls-files)
+          fi
+
+          for dir in */; do
+            module="${dir%/}"
+
+            # Skip if no changes in this module's init/ directory (unless manually triggered)
+            if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+              if ! echo "$CHANGED_FILES" | grep -q "^${module}/init/"; then
+                continue
+              fi
+            fi
+
+            # Skip if no module.yaml exists
+            if [ ! -f "${module}/module.yaml" ]; then
+              echo "No module.yaml found for ${module}, skipping"
+              continue
+            fi
+
+            image_count=$(yq '.images | length' "${module}/module.yaml")
+            if [ "$image_count" = "0" ] || [ "$image_count" = "null" ]; then
+              continue
+            fi
+
+            for i in $(seq 0 $((image_count - 1))); do
+              image_name=$(yq ".images[${i}].name" "${module}/module.yaml")
+              context=$(yq ".images[${i}].context" "${module}/module.yaml")
+              dockerfile=$(yq ".images[${i}].dockerfile" "${module}/module.yaml")
+              values_repo_path=$(yq ".images[${i}].valuesYaml.repositoryPath" "${module}/module.yaml")
+              values_tag_path=$(yq ".images[${i}].valuesYaml.tagPath" "${module}/module.yaml")
+
+              FULL_IMAGE="ghcr.io/${REPO_OWNER}/${image_name}"
+
+              echo "::group::Building ${FULL_IMAGE}:${SHORT_SHA}"
+              docker build \
+                -t "${FULL_IMAGE}:${SHORT_SHA}" \
+                -t "${FULL_IMAGE}:latest" \
+                -f "${module}/${dockerfile}" \
+                "${module}/${context}"
+
+              docker push "${FULL_IMAGE}" --all-tags
+              echo "::endgroup::"
+
+              # Update values.yaml with new image reference
+              yq -i "${values_repo_path} = \"${FULL_IMAGE}\"" "${module}/helm/values.yaml"
+              yq -i "${values_tag_path} = \"${SHORT_SHA}\"" "${module}/helm/values.yaml"
+              UPDATED=true
+            done
+          done
+
+          if [ "$UPDATED" = true ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add '*/helm/values.yaml'
+            git commit -m "ci: update image tags to ${SHORT_SHA}"
+            git push
+          fi
